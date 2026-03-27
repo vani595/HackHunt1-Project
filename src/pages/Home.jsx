@@ -59,9 +59,9 @@ const Home = () => {
           <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
         </div>
 
-        <div className="relative mx-auto max-w-screen-xl px-6 py-16 sm:py-20 lg:py-24">
-          <div className="grid items-center gap-12 lg:grid-cols-[1.05fr_0.95fr]">
-            <div>
+        <div className="relative mx-auto max-w-[1380px] px-6 py-16 sm:py-20 lg:py-24">
+          <div className="grid items-center gap-12 lg:grid-cols-[0.95fr_1.05fr] lg:gap-16">
+            <div className="max-w-3xl">
               <h1 className="max-w-4xl text-5xl font-black leading-[0.92] tracking-[-0.06em] text-white sm:text-6xl lg:text-[7rem]">
                 Discover
                 <span className="mt-2 block bg-gradient-to-r from-violet-300 via-blue-300 to-cyan-300 bg-clip-text text-transparent">
@@ -94,16 +94,16 @@ const Home = () => {
               </div>
             </div>
 
-            <div className="relative min-h-[520px]">
-              <div className="absolute right-0 top-2 h-96 w-96 rounded-full bg-violet-500/15 blur-3xl" />
-              <div className="absolute bottom-8 left-8 h-64 w-64 rounded-full bg-cyan-400/10 blur-3xl" />
+            <div className="relative min-h-[520px] sm:min-h-[620px] lg:min-h-[760px]">
+              <div className="absolute right-0 top-2 h-[30rem] w-[30rem] rounded-full bg-violet-500/15 blur-3xl" />
+              <div className="absolute bottom-8 left-4 h-[24rem] w-[24rem] rounded-full bg-cyan-400/10 blur-3xl" />
 
-              <div className="absolute right-0 top-0 w-full max-w-[42rem] rounded-[2.2rem] border border-white/10 bg-white/[0.05] p-6 shadow-[0_24px_80px_rgba(2,6,23,0.45)] backdrop-blur-xl">
-                <div className="rounded-[1.9rem] bg-[linear-gradient(135deg,rgba(91,33,182,0.22),rgba(15,23,42,0.65),rgba(34,211,238,0.16))] p-5">
+              <div className="absolute inset-x-0 top-1/2 mx-auto w-full max-w-[54rem] -translate-y-1/2 rounded-[2.5rem] border border-white/10 bg-white/[0.05] p-4 shadow-[0_24px_80px_rgba(2,6,23,0.45)] backdrop-blur-xl sm:p-6 lg:max-w-[60rem] lg:p-7">
+                <div className="rounded-[2rem] bg-[linear-gradient(135deg,rgba(91,33,182,0.22),rgba(15,23,42,0.65),rgba(34,211,238,0.16))] p-4 sm:p-5 lg:p-6">
                   <img
                     src={heroImage}
                     alt="Hackathon participants collaborating around laptops"
-                    className="h-[26rem] w-full rounded-[1.5rem] object-cover lg:h-[30rem]"
+                    className="h-auto w-full rounded-[1.6rem] object-cover"
                   />
                 </div>
               </div>

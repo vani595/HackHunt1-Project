@@ -1,11 +1,8 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 
-import { User, Settings2, ShieldCheck, UserPlus, Hammer } from 'lucide-react';
+import { Rocket, User, Settings2, ShieldCheck, UserPlus, Hammer } from 'lucide-react';
 import NavbarDropdownButton from '../NavbarDropdownButton';
-// logo image
-import logoImg from '../../assets/logo.png';
-
 
 const Header = () => {
   const { pathname } = useLocation();
@@ -66,8 +63,8 @@ const Header = () => {
           {/* Left side - Logo and text */}
           <div className="flex items-center">
             <Link to="/" className="group flex items-center space-x-3">
-              <div className="h-14 w-auto transition duration-300 group-hover:scale-110">
-                <img src={logoImg} alt="HackHunt logo" className="h-full w-auto object-contain" />
+              <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-blue-500 transition duration-300 group-hover:scale-110">
+                <Rocket className="h-8 w-8 text-white" />
               </div>
               <div>
                 <span className={`text-4xl font-extrabold bg-gradient-to-r bg-clip-text text-transparent ${

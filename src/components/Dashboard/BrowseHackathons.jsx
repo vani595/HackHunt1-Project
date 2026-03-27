@@ -3,7 +3,7 @@ import {
   ArrowUpRight,
   Calendar,
   Filter,
-  MapPin, // Will be used for location display
+  MapPin,
   Search,
   Sparkles,
   Users,
@@ -17,7 +17,8 @@ import mockHackathons from "../../data/unstop_scraped_data.json";
 const getStatusTone = (status) => {
   if (status === "ongoing") return "bg-emerald-500/20 text-emerald-100 border-emerald-500/30";
   if (status === "ended") return "bg-slate-800/60 text-slate-300 border-slate-600/50";
-  return "bg-blue-500/20 text-blue-100 border-blue-500/30";
+  if (status === "upcoming") return "bg-blue-500/20 text-blue-100 border-blue-500/30";
+  return "bg-slate-100 text-slate-600 border-slate-200";
 };
 
 const getModeIcon = (mode) => {
@@ -26,16 +27,30 @@ const getModeIcon = (mode) => {
   return <Sparkles size={14} className="mr-1" />;
 };
 
+// FIXED: Advanced Status Parser (Same as Map)
+const getHackathonStatus = (hackathon) => {
+  try {
+    const cleanStartDateStr = (hackathon.startDate || "").replace("Posted ", "").trim();
+    const start = new Date(cleanStartDateStr);
+    const end = hackathon.endDate ? new Date(hackathon.endDate) : new Date(start.getTime() + (3 * 24 * 60 * 60 * 1000));
+    const now = new Date();
+
+    if (!isNaN(end.getTime()) && end < now) return "ended";
+    if (!isNaN(start.getTime()) && start > now) return "upcoming";
+    if (!isNaN(start.getTime()) && start <= now && end >= now) return "ongoing";
+  } catch (e) {}
+  
+  const normalized = String(hackathon?.status || "").toLowerCase();
+  if (normalized === "open" || normalized === "active") return "ongoing";
+  return "ended";
+};
+
 const BrowseHackathons = ({ user, initialSearchTerm = "" }) => {
   const [hackathons, setHackathons] = useState([]);
-  const [registrations, setRegistrations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
-  
-  // NEW STATE: For the dedicated location filter
-  const [locationSearchTerm, setLocationSearchTerm] = useState("");
 
   const loadData = async () => {
     try {
@@ -48,11 +63,11 @@ const BrowseHackathons = ({ user, initialSearchTerm = "" }) => {
         mode: h.type, 
         organizerName: h.organizer, 
         prize: h.totalPrize,
-        // No explicit mapping needed for location, it will be preserved from the JSON.
+        // Calculate standard status immediately
+        calculatedStatus: getHackathonStatus(h) 
       }));
 
       setHackathons(formattedMockData);
-      setRegistrations([]); // Static data, so no real user registrations
     } catch (err) {
       console.error("Error loading JSON data:", err);
       setError("Failed to load hackathons from the JSON file.");
@@ -71,35 +86,31 @@ const BrowseHackathons = ({ user, initialSearchTerm = "" }) => {
     }
   }, [initialSearchTerm]);
 
-  // Updated filteredHackathons memo to include the location filter
+  // FIXED: Bulletproof Filter Logic
   const filteredHackathons = useMemo(() => {
     return hackathons.filter((hackathon) => {
-      // 1. General Search (searches title, description, and organizer)
-      const matchesSearch =
-        !searchTerm ||
-        hackathon.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        hackathon.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        String(hackathon.organizerName || "").toLowerCase().includes(searchTerm.toLowerCase());
-        // Note: location is removed from the general search to avoid confusion with the dedicated filter.
-
-      // 2. NEW: Location Filter
-      const matchesLocationFilter = 
-        !locationSearchTerm ||
-        String(hackathon.location || "").toLowerCase().includes(locationSearchTerm.toLowerCase());
-
-      // 3. Status Filter
-      const matchesStatus = filterStatus === "all" || hackathon.status === filterStatus;
+      // 1. Search Logic (Title, Description, Organizer, Location)
+      const searchTarget = `
+        ${hackathon.title || ""} 
+        ${hackathon.description || ""} 
+        ${hackathon.organizerName || ""} 
+        ${hackathon.location || ""}
+      `.toLowerCase();
       
-      // Combine all filters
-      return matchesSearch && matchesLocationFilter && matchesStatus;
-    });
-  }, [filterStatus, hackathons, searchTerm, locationSearchTerm]); // Add locationSearchTerm as a dependency
+      const matchesSearch = !searchTerm || searchTarget.includes(searchTerm.toLowerCase().trim());
 
+      // 2. Status Logic
+      const matchesStatus = filterStatus === "all" || hackathon.calculatedStatus === filterStatus;
+      
+      return matchesSearch && matchesStatus;
+    });
+  }, [filterStatus, hackathons, searchTerm]);
+
+  // Handle direct redirect for "Register" button
   const handleRegister = (hackathon) => {
     if (hackathon.registrationUrl) {
-      window.location.href = hackathon.registrationUrl;
+      window.open(hackathon.registrationUrl, '_blank');
     } else {
-      console.warn("No registration URL found for this hackathon.");
       setError("Could not find a registration URL for this hackathon.");
       setTimeout(() => setError(""), 3000);
     }
@@ -139,7 +150,7 @@ const BrowseHackathons = ({ user, initialSearchTerm = "" }) => {
             <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4">
               <div className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-700">Active Events</div>
               <div className="mt-2 text-3xl font-bold text-slate-950">
-                {hackathons.filter((item) => item.status !== "ended").length}
+                {hackathons.filter((item) => item.calculatedStatus === "ongoing").length}
               </div>
             </div>
           </div>
@@ -160,21 +171,9 @@ const BrowseHackathons = ({ user, initialSearchTerm = "" }) => {
             <Search className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
-              placeholder="Search by title, description, or organizer..."
+              placeholder="Search by title, location, or organizer..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-12 py-3.5 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:bg-white focus:ring-4 focus:ring-violet-500/10"
-            />
-          </div>
-
-          {/* NEW: Filter by Location input */}
-          <div className="relative flex-1 lg:max-w-xs">
-            <MapPin className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
-            <input
-              type="text"
-              placeholder="Filter by Location (e.g., Rajasthan)"
-              value={locationSearchTerm}
-              onChange={(e) => setLocationSearchTerm(e.target.value)}
               className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-12 py-3.5 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:bg-white focus:ring-4 focus:ring-violet-500/10"
             />
           </div>
@@ -186,7 +185,7 @@ const BrowseHackathons = ({ user, initialSearchTerm = "" }) => {
             <select
               value={filterStatus}
               onChange={(e) => setFilterStatus(e.target.value)}
-              className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3.5 text-sm font-medium text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-500/10"
+              className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3.5 text-sm font-medium text-slate-900 outline-none transition cursor-pointer focus:border-violet-300 focus:ring-4 focus:ring-violet-500/10"
             >
               <option value="all">All Statuses</option>
               <option value="upcoming">Upcoming</option>
@@ -201,7 +200,7 @@ const BrowseHackathons = ({ user, initialSearchTerm = "" }) => {
       {filteredHackathons.length > 0 ? (
         <div className="grid grid-cols-1 gap-8 xl:grid-cols-2">
           {filteredHackathons.map((hackathon, index) => {
-            const isEnded = hackathon.status === "ended";
+            const isEnded = hackathon.calculatedStatus === "ended";
 
             return (
               <article
@@ -225,8 +224,8 @@ const BrowseHackathons = ({ user, initialSearchTerm = "" }) => {
                   
                   {/* Floating Badges inside Image */}
                   <div className="absolute left-5 top-5 flex gap-2">
-                    <span className={`inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-bold uppercase tracking-wider backdrop-blur-md ${getStatusTone(hackathon.status)}`}>
-                      {hackathon.status}
+                    <span className={`inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-bold uppercase tracking-wider backdrop-blur-md ${getStatusTone(hackathon.calculatedStatus)}`}>
+                      {hackathon.calculatedStatus}
                     </span>
                   </div>
                   
@@ -251,39 +250,28 @@ const BrowseHackathons = ({ user, initialSearchTerm = "" }) => {
 
                 {/* Card Body */}
                 <div className="flex flex-1 flex-col p-6">
-                  {/* Short description limit to avoid massive boxes */}
+                  {/* Short description limit */}
                   <p className="text-sm leading-relaxed text-slate-600 line-clamp-2 mb-6">
-                    {/* Stripping markdown from the JSON data description for clean display */}
                     {hackathon.description.replace(/[#*]/g, '').trim()}
                   </p>
 
-                  {/* Updated Details Grid: Changed from 2 to 3 columns to add location */}
-                  <div className="grid gap-3 sm:grid-cols-3 mb-6">
+                  <div className="grid gap-3 sm:grid-cols-2 mb-6">
                     <div className="flex items-center gap-3 rounded-2xl bg-slate-50 px-4 py-3 border border-slate-100">
                       <div className="rounded-full bg-blue-100 p-2 text-blue-600"><Calendar size={16} /></div>
                       <div>
                         <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Date</div>
                         <div className="text-sm font-semibold text-slate-900">
-                          {new Date(hackathon.startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                          {hackathon.startDate.replace("Posted", "").trim()}
                         </div>
                       </div>
                     </div>
-                    <div className="flex items-center gap-3 rounded-2xl bg-slate-50 px-4 py-3 border border-slate-100">
-                      <div className="rounded-full bg-emerald-100 p-2 text-emerald-600"><Users size={16} /></div>
-                      <div>
-                        <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Spots</div>
-                        <div className="text-sm font-semibold text-slate-900">
-                          {hackathon.participants?.toLocaleString() || 0} / {hackathon.maxParticipants?.toLocaleString() || "Unlimited"}
-                        </div>
-                      </div>
-                    </div>
-                    {/* NEW: Location details section */}
+                    
                     <div className="flex items-center gap-3 rounded-2xl bg-slate-50 px-4 py-3 border border-slate-100">
                       <div className="rounded-full bg-red-100 p-2 text-red-600"><MapPin size={16} /></div>
-                      <div>
+                      <div className="w-full overflow-hidden">
                         <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Location</div>
-                        <div className="text-sm font-semibold text-slate-900 line-clamp-1">
-                          {hackathon.location || "Online/TBA"}
+                        <div className="text-sm font-semibold text-slate-900 truncate" title={hackathon.location}>
+                          {hackathon.location ? hackathon.location.split(',').slice(-2).join(',') : "Online"}
                         </div>
                       </div>
                     </div>
@@ -305,7 +293,6 @@ const BrowseHackathons = ({ user, initialSearchTerm = "" }) => {
 
                   {/* Action Buttons */}
                   <div className="flex items-center justify-between gap-3 border-t border-slate-100 pt-5">
-                    {/* Placeholder div since we are only using one button now for direct registration */}
                     <div className="flex-1"></div>
                     
                     <button
@@ -334,7 +321,7 @@ const BrowseHackathons = ({ user, initialSearchTerm = "" }) => {
           <Sparkles className="mb-4 h-10 w-10 text-slate-300" />
           <h3 className="text-lg font-bold text-slate-900">No hackathons found</h3>
           <p className="mt-2 text-sm text-slate-500 max-w-sm">
-            We couldn't find any hackathons matching your current filters. Try adjusting your search criteria or location.
+            We couldn't find any hackathons matching your current filters. Try adjusting your search or status.
           </p>
         </div>
       )}

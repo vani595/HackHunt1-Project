@@ -4,8 +4,8 @@ import { apiClient } from "../api/client";
 import { Eye, EyeOff } from "lucide-react";
 
 const LoginOrganizer = () => {
-  const [email, setEmail] = useState("organizer@hackhunt.com");
-  const [password, setPassword] = useState("Organizer@123");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [showPassword, setShowPassword] = useState(false);

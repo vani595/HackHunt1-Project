@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+
 import { apiClient } from "../../api/client";
 import { useRealtimeStream } from "../../hooks/useRealtimeStream";
 
@@ -7,7 +8,6 @@ const AdminActivityLog = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
-
   const adminId = localStorage.getItem("userId");
 
   const loadLogs = async () => {
