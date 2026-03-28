@@ -68,8 +68,19 @@ const HackathonDetail = () => {
     }
   };
 
+  const normalizeDateValue = (dateString) => {
+    if (!dateString) return null;
+    const cleaned = dateString.toString().replace(/Posted\s*/i, '').trim();
+    const parsed = new Date(cleaned);
+    return isNaN(parsed.getTime()) ? null : parsed;
+  };
+
   const formatDate = (dateString) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
+    const dateObj = normalizeDateValue(dateString);
+    if (!dateObj) {
+      return dateString || 'TBA';
+    }
+    return dateObj.toLocaleDateString('en-US', {
       weekday: 'long',
       year: 'numeric',
       month: 'long',
@@ -78,9 +89,11 @@ const HackathonDetail = () => {
   };
 
   const getDaysUntil = () => {
-    const start = new Date(hackathon.startDate);
+    const startDateObj = normalizeDateValue(hackathon.startDate);
+    if (!startDateObj) return 'Date not available';
+
     const now = new Date();
-    const diffTime = start.getTime() - now.getTime();
+    const diffTime = startDateObj.getTime() - now.getTime();
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
     if (diffDays > 0) return `${diffDays} days to go`;
@@ -148,7 +161,7 @@ const HackathonDetail = () => {
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <Link
-        to="/"
+        to="/dashboard/user?section=browse"
         className="inline-flex items-center text-gray-600 hover:text-gray-900 mb-6 transition-colors duration-200"
       >
         <ArrowLeft className="h-4 w-4 mr-2" />
@@ -304,7 +317,11 @@ const HackathonDetail = () => {
               Join thousands of developers building innovative solutions
             </p>
             <a
-              href={hackathon.registrationUrl}
+              href={
+                hackathon.registrationUrl && hackathon.registrationUrl !== '#'
+                  ? hackathon.registrationUrl
+                  : `https://unstop.com/search?q=${encodeURIComponent(hackathon.title || '')}`
+              }
               target="_blank"
               rel="noopener noreferrer"
               className="w-full bg-white text-purple-600 py-3 px-4 rounded-lg font-semibold hover:bg-gray-50 transition-colors duration-200 flex items-center justify-center"

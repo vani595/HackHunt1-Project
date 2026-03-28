@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { apiClient } from "../api/client";
+import { isEmailDomainAllowed, allowedEmailDomains } from "../utils/validation";
 import { Eye, EyeOff } from "lucide-react";
 
 const SignupUser = () => {
@@ -26,11 +27,18 @@ const SignupUser = () => {
     e.preventDefault();
     setError("");
     setErrors([]);
+
+    const emailValue = (formData.email || "").trim().toLowerCase();
+    if (!isEmailDomainAllowed(emailValue)) {
+      setError(`Email must be one of: ${allowedEmailDomains.join(", ")}`);
+      return;
+    }
+
     setLoading(true);
 
     try {
       const response = await apiClient.signup(
-        formData.email,
+        emailValue,
         formData.password,
         formData.firstName,
         formData.lastName,

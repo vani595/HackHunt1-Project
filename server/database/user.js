@@ -2,6 +2,7 @@ const { Router } = require("express");
 const bcryptjs = require("bcryptjs");
 const mongoose = require("mongoose");
 const { broadcast, createActivity } = require("../utils/realtimeHub");
+const { isEmailDomainAllowed, allowedEmailDomains } = require("../utils/validation");
 
 const userRouter = Router();
 const Schema = mongoose.Schema;
@@ -109,7 +110,9 @@ const validateSignupInput = (
   const errors = [];
   const normalizedPhoneNumber = String(phoneNumber || "").replace(/\D/g, "");
 
-  if (!email || !email.includes("@")) errors.push("Please provide a valid email");
+  if (!email || !/^[^\s@]+@gmail\.com$/i.test(email.trim())) {
+    errors.push("Please provide a valid @gmail.com email address");
+  }
   if (!password || password.length < 8) {
     errors.push("Password must be at least 8 characters");
   }

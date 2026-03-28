@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   ArrowUpRight,
   Calendar,
@@ -293,8 +294,17 @@ const BrowseHackathons = ({ user, initialSearchTerm = "" }) => {
 
                   {/* Action Buttons */}
                   <div className="flex items-center justify-between gap-3 border-t border-slate-100 pt-5">
-                    <div className="flex-1"></div>
-                    
+                    {hackathon.calculatedStatus === "ongoing" ? (
+                      <Link
+                        to={`/hackathon/${hackathon._id || hackathon.id}`}
+                        className="flex-1 rounded-2xl border border-violet-200 bg-violet-50 px-4 py-3.5 text-sm font-bold text-violet-700 transition-colors duration-200 hover:bg-violet-100 text-center"
+                      >
+                        View Details
+                      </Link>
+                    ) : (
+                      <div className="flex-1" />
+                    )}
+
                     <button
                       onClick={() => handleRegister(hackathon)}
                       disabled={isEnded}
