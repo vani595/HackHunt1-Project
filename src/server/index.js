@@ -1,68 +1,91 @@
-import dotenv from 'dotenv';
-dotenv.config();
+const express = require("express");
+const mongoose = require("mongoose");
+const cors = require("cors");
+require("dotenv").config();
 
-import express from 'express';
-import cors from 'cors';
-import {
-  getHackathons,
-  getHackathon,
-  getHackathonStats,
-  fetchAndStoreHackathons,
-  chatWithBot
-} from './routes/hackathons';
-import {
-  getSources,
-  createSource,
-  updateSource,
-  deleteSource,
-  fetchFromSource
-} from './routes/sources';
+const { userRouter } = require("./database/user");
+const { adminRouter } = require("./routes/admin");
+const forgotPasswordRoutes = require("./routes/forgotPassword");
+const hackathonRoutes = require("./routes/hackathonRoutes");
+const { realtimeRouter } = require("./routes/realtime");
+const chatRoute = require("./routes/chatRoute.js");
 
-import path from 'path';
+// NAYA IMPORT ADD KIYA HAI YAHAN (Contact Form ke liye)
+const contactRoutes = require("./routes/contactRoutes"); 
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = Number(process.env.PORT) || 5000;
+const MONGODB_URI =
+  process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/project1";
 
-// Middleware
-app.use(cors());
+app.use(
+  cors({
+    origin: [
+      "http://localhost:5173",
+      "http://localhost:5174",
+      "http://localhost:5175",
+      "http://localhost:3000"
+    ],
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
+    allowedHeaders: ["Content-Type", "Authorization"]
+  })
+);
+
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-// Serve static files from Vite build in production
-if (process.env.NODE_ENV === 'production') {
-  const distPath = path.join(__dirname, '../../dist');
-  app.use(express.static(distPath));
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(distPath, 'index.html'));
+app.get("/api/v1/health", (req, res) => {
+  res.json({
+    status: "ok",
+    message: "Server is running",
+    databaseState: mongoose.connection.readyState
   });
+});
+
+app.use("/api/v1/user", userRouter);
+app.use("/api/v1/admin", adminRouter);
+app.use("/api/v1/forgot-password", forgotPasswordRoutes);
+app.use("/api/v1/hackathons", hackathonRoutes);
+app.use("/api/v1/realtime", realtimeRouter);
+
+// NAYA ROUTE YAHAN ADD KIYA HAI (Frontend yahan data bhejega)
+app.use("/api/v1/contact-us", contactRoutes); 
+
+app.use("/api/hackathons", hackathonRoutes);
+app.use("/api/chat", chatRoute);
+
+async function startServer() {
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+    console.log(`Health check: http://localhost:${PORT}/api/v1/health`);
+  });
+
+  let connected = false;
+  try {
+    await mongoose.connect(MONGODB_URI, {
+      serverSelectionTimeoutMS: 5000
+    });
+    console.log(`MongoDB connected: ${MONGODB_URI}`);
+    connected = true;
+  } catch (error) {
+    console.error("MongoDB connection failed:", error.message);
+    const fallbackUri = "mongodb://127.0.0.1:27017/project1";
+    if (MONGODB_URI !== fallbackUri) {
+      try {
+        await mongoose.connect(fallbackUri, {
+          serverSelectionTimeoutMS: 5000
+        });
+        console.log(`MongoDB fallback connected: ${fallbackUri}`);
+        connected = true;
+      } catch (fallbackError) {
+        console.error("MongoDB fallback failed:", fallbackError.message);
+      }
+    }
+    if (!connected) {
+      console.error("Continuing without a live database connection.");
+    }
+  }
 }
 
-// Hackathon routes
-app.get('/api/hackathons', getHackathons);
-app.get('/api/hackathons/stats', getHackathonStats);
-app.get('/api/hackathons/:id', getHackathon);
-app.post('/api/hackathons/fetch', fetchAndStoreHackathons);
-app.post('/api/chatbot', chatWithBot);
-
-// Source routes (admin)
-app.get('/api/sources', getSources);
-app.post('/api/sources', createSource);
-app.put('/api/sources/:id', updateSource);
-app.delete('/api/sources/:id', deleteSource);
-app.post('/api/sources/:id/fetch', fetchFromSource);
-
-// Health check
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'OK', timestamp: new Date().toISOString() });
-});
-
-// Error handling middleware
-app.use((err, req, res, next) => {
-  console.error('Server error:', err);
-  res.status(500).json({ error: 'Internal server error' });
-});
-
-app.listen(PORT, () => {
-  console.log(`🚀 API Server running on port ${PORT}`);
-});
-
-export default app;
+startServer();

@@ -14,6 +14,8 @@ import SignupUser from './pages/SignupUser';
 import SignupOrganizer from './pages/SignupOrganizer';
 import SignupAdmin from './pages/SignupAdmin';
 import ForgotPassword from './pages/ForgotPassword';
+import ChatBot from "./components/ChatBot";
+import { createPortal } from 'react-dom';
 
 
 function App() {
@@ -42,6 +44,7 @@ function App() {
           <Route path="/signup" element={<Signup />} />
         </Route>
       </Routes>
+   {createPortal(<ChatBot />, document.body)}
     </Router>
   );
 }
