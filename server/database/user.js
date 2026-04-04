@@ -7,12 +7,14 @@ const { isValidEmail } = require("../utils/validation");
 const userRouter = Router();
 const Schema = mongoose.Schema;
 
+// ── SCHEMAS ──────────────────────────────────────────────────
+
 const userSchema = new Schema(
   {
     email: { type: String, unique: true, required: true, lowercase: true, trim: true },
-    password: { type: String, required: true },
+    password: { type: String, required: false, default: null },        // null for Google OAuth users
     firstName: { type: String, required: true },
-    lastName: { type: String, required: true },
+    lastName: { type: String, required: false, default: "" },          // optional for Google OAuth
     phoneNumber: { type: String, required: true },
     role: { type: String, default: "user", enum: ["user"], immutable: true },
     profilePicture: { type: String, default: null },
@@ -31,9 +33,9 @@ const userSchema = new Schema(
 const organizerSchema = new Schema(
   {
     email: { type: String, unique: true, required: true, lowercase: true, trim: true },
-    password: { type: String, required: true },
+    password: { type: String, required: false, default: null },        // null for Google OAuth users
     firstName: { type: String, required: true },
-    lastName: { type: String, required: true },
+    lastName: { type: String, required: false, default: "" },          // optional for Google OAuth
     phoneNumber: { type: String, required: true },
     role: { type: String, default: "organizer", enum: ["organizer"], immutable: true },
     organizationName: { type: String, required: true },
@@ -88,10 +90,13 @@ const adminSchema = new Schema(
   { timestamps: true }
 );
 
+// ── MODELS ───────────────────────────────────────────────────
+
 const User = mongoose.models.users || mongoose.model("users", userSchema);
-const Organizer =
-  mongoose.models.organizers || mongoose.model("organizers", organizerSchema);
+const Organizer = mongoose.models.organizers || mongoose.model("organizers", organizerSchema);
 const Admin = mongoose.models.admins || mongoose.model("admins", adminSchema);
+
+// ── HELPERS ──────────────────────────────────────────────────
 
 const getModelForRole = (role = "user") => {
   if (role === "organizer") return Organizer;
@@ -164,10 +169,12 @@ const comparePassword = async (password, hashedPassword) => {
   return bcryptjs.compare(password, hashedPassword);
 };
 
+// ── ROUTES ───────────────────────────────────────────────────
+
+// 1. SIGNUP
 userRouter.post("/signup", async (req, res) => {
   try {
-    const { email, password, firstName, lastName, phoneNumber, role = "user" } =
-      req.body;
+    const { email, password, firstName, lastName, phoneNumber, role = "user" } = req.body;
     const validationErrors = validateSignupInput(
       email,
       password,
@@ -229,6 +236,7 @@ userRouter.post("/signup", async (req, res) => {
   }
 });
 
+// 2. SIGNIN
 userRouter.post("/signin", async (req, res) => {
   try {
     const { email, password, role = "user" } = req.body;
@@ -279,6 +287,151 @@ userRouter.post("/signin", async (req, res) => {
   }
 });
 
+// 3. GOOGLE AUTH — USER
+userRouter.post("/google-auth", async (req, res) => {
+  try {
+    const { email, firstName, lastName, uid, profilePicture, checkOnly } = req.body;
+
+    if (!email || !uid) {
+      return res.status(400).json({ message: "Email and uid are required" });
+    }
+
+    let user = await User.findOne({ email: email.toLowerCase() });
+
+    if (checkOnly && !user) {
+      return res.status(404).json({ message: "No account found. Please sign up first!" });
+    }
+
+    const isNewUser = !user;
+    if (isNewUser) {
+      user = await User.create({
+        email: email.toLowerCase(),
+        firstName: firstName || "User",
+        lastName: lastName || "",
+        phoneNumber: "0000000000",
+        password: null,
+        profilePicture: profilePicture || null,
+        role: "user"
+      });
+
+      broadcast("user:created", {
+        userId: String(user._id),
+        role: user.role,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        email: user.email
+      });
+
+      createActivity({
+        type: "user_signup",
+        authorId: String(user._id),
+        authorName: `${user.firstName} ${user.lastName}`.trim(),
+        authorRole: user.role,
+        message: `${user.firstName} joined the platform via Google.`,
+        targetId: String(user._id),
+        targetType: "user"
+      });
+    }
+
+    user.lastLogin = new Date();
+    await user.save();
+
+    return res.status(200).json({
+      message: isNewUser ? "Account created" : "Login successful",
+      userId: user._id,
+      role: user.role,
+      firstName: user.firstName,
+      email: user.email,
+      isNewUser
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
+// 4. GOOGLE AUTH — ORGANIZER
+userRouter.post("/google-auth-organizer", async (req, res) => {
+  try {
+    const { email, firstName, lastName, uid, profilePicture, organizationName, checkOnly } = req.body;
+
+    if (!email || !uid) {
+      return res.status(400).json({ message: "Email and uid are required" });
+    }
+
+    let organizer = await Organizer.findOne({ email: email.toLowerCase() });
+
+    // Login — organizer nahi mila
+    if (checkOnly && !organizer) {
+      return res.status(404).json({ message: "No organizer account found. Please sign up first!" });
+    }
+
+    // Login — organizer mila
+    if (checkOnly && organizer) {
+      organizer.lastLogin = new Date();
+      await organizer.save();
+      return res.status(200).json({
+        message: "Login successful",
+        userId: organizer._id,
+        role: organizer.role,
+        firstName: organizer.firstName,
+        email: organizer.email,
+        isNewUser: false
+      });
+    }
+
+    // Signup — create karo
+    if (!organizer) {
+      if (!organizationName) {
+        return res.status(400).json({ message: "Organization name is required" });
+      }
+
+      organizer = await Organizer.create({
+        email: email.toLowerCase(),
+        firstName: firstName || "Organizer",
+        lastName: lastName || "",
+        phoneNumber: "0000000000",
+        password: null,
+        profilePicture: profilePicture || null,
+        organizationName,
+        role: "organizer"
+      });
+
+      broadcast("user:created", {
+        userId: String(organizer._id),
+        role: organizer.role,
+        firstName: organizer.firstName,
+        lastName: organizer.lastName,
+        email: organizer.email
+      });
+
+      createActivity({
+        type: "organizer_signup",
+        authorId: String(organizer._id),
+        authorName: `${organizer.firstName} ${organizer.lastName}`.trim(),
+        authorRole: organizer.role,
+        message: `${organizer.firstName} joined the platform as organizer via Google.`,
+        targetId: String(organizer._id),
+        targetType: "organizer"
+      });
+    }
+
+    organizer.lastLogin = new Date();
+    await organizer.save();
+
+    return res.status(200).json({
+      message: "Account created",
+      userId: organizer._id,
+      role: organizer.role,
+      firstName: organizer.firstName,
+      email: organizer.email,
+      isNewUser: true
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
+// 5. PROFILE GET
 userRouter.get("/profile/:userId/:role", async (req, res) => {
   try {
     const { userId, role } = req.params;
@@ -295,6 +448,58 @@ userRouter.get("/profile/:userId/:role", async (req, res) => {
   }
 });
 
+// 6. PROFILE UPDATE
+userRouter.put("/profile/:userId/:role", async (req, res) => {
+  try {
+    const { userId, role } = req.params;
+    const model = getModelForRole(role);
+    const allowedFields = [
+      "firstName",
+      "lastName",
+      "phoneNumber",
+      "profilePicture",
+      "bio",
+      "skills",
+      "adminLevel",
+      "department",
+      "organizationName",
+      "organizationWebsite",
+      "organizationLogo"
+    ];
+
+    const updates = Object.fromEntries(
+      Object.entries(req.body).filter(([key]) => allowedFields.includes(key))
+    );
+
+    const user = await model
+      .findByIdAndUpdate(userId, updates, { new: true, runValidators: true })
+      .select("-password");
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    broadcast("profile:updated", {
+      userId: String(user._id),
+      role: user.role,
+      profile: user
+    });
+
+    createActivity({
+      type: "profile_updated",
+      authorId: String(user._id),
+      authorName: `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.email,
+      authorRole: user.role,
+      message: `${user.firstName || "A user"} updated their profile.`
+    });
+
+    res.json(user);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 7. DIRECTORY GET
 userRouter.get("/directory", async (req, res) => {
   try {
     const [users, organizers, admins] = await Promise.all([
@@ -311,31 +516,22 @@ userRouter.get("/directory", async (req, res) => {
         role: account.role,
         status: account.isActive ? "active" : "inactive",
         joinDate: account.createdAt,
-        hackathonsJoined: Array.isArray(account.joinedHackathons)
-          ? account.joinedHackathons.length
-          : 0,
-        registrations: Array.isArray(account.joinedHackathons)
-          ? account.joinedHackathons.length
-          : 0,
-        hackathonsCreated: Array.isArray(account.hackathonsCreated)
-          ? account.hackathonsCreated.length
-          : 0,
-        participants: Array.isArray(account.hackathonsManaged)
-          ? account.hackathonsManaged.length
-          : 0,
+        hackathonsJoined: Array.isArray(account.joinedHackathons) ? account.joinedHackathons.length : 0,
+        registrations: Array.isArray(account.joinedHackathons) ? account.joinedHackathons.length : 0,
+        hackathonsCreated: Array.isArray(account.hackathonsCreated) ? account.hackathonsCreated.length : 0,
+        participants: Array.isArray(account.hackathonsManaged) ? account.hackathonsManaged.length : 0,
         organizationName: account.organizationName || "",
         lastUpdated: account.updatedAt
       }))
       .sort((a, b) => new Date(b.joinDate).getTime() - new Date(a.joinDate).getTime());
 
-    res.json({
-      users: directory
-    });
+    res.json({ users: directory });
   } catch (error) {
     res.status(500).json({ message: "Server error", error: error.message });
   }
 });
 
+// 8. DIRECTORY STATUS UPDATE
 userRouter.patch("/directory/:userId/status", async (req, res) => {
   try {
     const { userId } = req.params;
@@ -343,11 +539,7 @@ userRouter.patch("/directory/:userId/status", async (req, res) => {
     const model = getModelForRole(role);
 
     const updatedUser = await model
-      .findByIdAndUpdate(
-        userId,
-        { isActive: Boolean(isActive) },
-        { new: true, runValidators: true }
-      )
+      .findByIdAndUpdate(userId, { isActive: Boolean(isActive) }, { new: true, runValidators: true })
       .select("-password");
 
     if (!updatedUser) {
@@ -368,15 +560,13 @@ userRouter.patch("/directory/:userId/status", async (req, res) => {
       message: `${updatedUser.firstName || "A user"} is now ${updatedUser.isActive ? "active" : "inactive"}.`
     });
 
-    return res.json({
-      message: "User status updated successfully.",
-      user: updatedUser
-    });
+    return res.json({ message: "User status updated successfully.", user: updatedUser });
   } catch (error) {
     return res.status(500).json({ message: "Failed to update user status.", error: error.message });
   }
 });
 
+// 9. DIRECTORY DELETE
 userRouter.delete("/directory/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
@@ -401,64 +591,9 @@ userRouter.delete("/directory/:userId", async (req, res) => {
       message: `${deletedUser.firstName || "A user"} was removed from the platform.`
     });
 
-    return res.json({
-      message: "User deleted successfully."
-    });
+    return res.json({ message: "User deleted successfully." });
   } catch (error) {
     return res.status(500).json({ message: "Failed to delete user.", error: error.message });
-  }
-});
-
-userRouter.put("/profile/:userId/:role", async (req, res) => {
-  try {
-    const { userId, role } = req.params;
-    const model = getModelForRole(role);
-    const allowedFields = [
-      "firstName",
-      "lastName",
-      "phoneNumber",
-      "profilePicture",
-      "bio",
-      "skills",
-      "adminLevel",
-      "department",
-      "organizationName",
-      "organizationWebsite",
-      "organizationLogo"
-    ];
-
-    const updates = Object.fromEntries(
-      Object.entries(req.body).filter(([key]) => allowedFields.includes(key))
-    );
-
-    const user = await model
-      .findByIdAndUpdate(userId, updates, {
-        new: true,
-        runValidators: true
-      })
-      .select("-password");
-
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
-
-    broadcast("profile:updated", {
-      userId: String(user._id),
-      role: user.role,
-      profile: user
-    });
-
-    createActivity({
-      type: "profile_updated",
-      authorId: String(user._id),
-      authorName: `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.email,
-      authorRole: user.role,
-      message: `${user.firstName || "A user"} updated their profile.`
-    });
-
-    res.json(user);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
   }
 });
 
