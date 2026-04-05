@@ -1,6 +1,198 @@
 import { Hackathon } from '../../types/hackathon';
 import { closeMindsDBConnection, getMindsDBConnection } from '../../api/database';
 
+function trimText(s: unknown): string {
+  if (s == null) return '';
+  return String(s).replace(/\s+/g, ' ').trim();
+}
+
+const MODE_ONLY_LABELS = new Set([
+  'online',
+  'virtual',
+  'remote',
+  'digital',
+  'hybrid',
+  'worldwide',
+  'global'
+]);
+
+const NOISE_PREFIX = new RegExp(
+  '^\\s*(organized by|hosted by|hosted at|held at|held in|presented by|' +
+    'brought to you by|powered by|from|at the|at|join us at|register at)\\s+',
+  'i'
+);
+
+function isModeOnlyLocationLabel(raw: string): boolean {
+  const t = trimText(raw).toLowerCase();
+  if (!t) return true;
+  if (MODE_ONLY_LABELS.has(t)) return true;
+  if (/^online\s+/i.test(t) && t.length < 24) return true;
+  return false;
+}
+
+function stripOrganizerPrefix(s: string): string {
+  const t = trimText(s);
+  const m = t.match(/^organizer\s*:\s*(.+)$/i);
+  return m ? trimText(m[1]) : t;
+}
+
+function cleanInstitutionPhrase(s: string): string {
+  let t = trimText(s);
+  let prev: string;
+  do {
+    prev = t;
+    t = t.replace(NOISE_PREFIX, '').trim();
+  } while (t !== prev);
+  t = t.replace(/\s+(hackathon|hackfest|event|competition)\s*$/i, '').trim();
+  return t;
+}
+
+function looksLikePhysicalVenueLabel(s: string): boolean {
+  const t = trimText(s);
+  if (t.length < 4) return false;
+  const lower = t.toLowerCase();
+  if (/\b(university|college|institute|institution|campus|school|polytechnic|academy|seminary)\b/.test(lower))
+    return true;
+  if (/\b(iit|nit|iiit|bits)\b/i.test(t)) return true;
+  if (/,\s*\S/.test(t)) return true;
+  if (/\b(india|usa|canada|uk|germany|france|china|japan|australia|brazil|mexico)\b/.test(lower))
+    return true;
+  return false;
+}
+
+function extractInstitutionFromText(raw: string): string {
+  if (!raw) return '';
+  let text = cleanInstitutionPhrase(stripOrganizerPrefix(String(raw)));
+
+  const candidates: string[] = [];
+
+  const pushIfValid = (chunk: string) => {
+    const c = cleanInstitutionPhrase(chunk);
+    if (!c || c.length < 4 || isModeOnlyLocationLabel(c)) return;
+    if (
+      !/\b(university|college|institute|institution|campus|polytechnic|academy|school)\b/i.test(c) &&
+      !/\b(iit|iiit|nit|bits)\b/i.test(c)
+    ) {
+      return;
+    }
+    candidates.push(c);
+  };
+
+  const patterns = [
+    /\b(University of\s+[A-Za-z0-9][A-Za-z0-9&,.'\-\s]{2,80})/gi,
+    /\b([A-Za-z0-9][A-Za-z0-9&,.'\-\s]{2,80}?\s+University)\b/gi,
+    /\b([A-Za-z0-9][A-Za-z0-9&,.'\-\s]{2,100}?\s+(?:Institute|Institution)(?:\s+of\s+[A-Za-z0-9][A-Za-z0-9&,.'\-\s]+)?)\b/gi,
+    /\b([A-Za-z0-9][A-Za-z0-9&,.'\-\s]{2,80}?\s+College(?:\s+of\s+[A-Za-z][A-Za-z\s]+)?)\b/gi,
+    /\b([A-Za-z0-9][A-Za-z0-9&,.'\-\s]{2,50}?\s+Campus)\b/gi,
+    /\b((?:IIT|IIIT|NIT|BITS)\s+[A-Za-z][A-Za-z0-9'\-\s]{1,48})\b/gi,
+    /\b(Indian Institute of Technology(?:\s+[A-Za-z][A-Za-z'\-\s]+)?)\b/gi,
+    /\b(?:at|@)\s+([A-Za-z0-9][A-Za-z0-9&,.'\-\s]{2,80}?(?:University|College|Institute|Campus))\b/gi
+  ];
+
+  for (const re of patterns) {
+    let m: RegExpExecArray | null;
+    const r = new RegExp(re.source, re.flags);
+    while ((m = r.exec(text)) !== null) {
+      if (m[1]) pushIfValid(m[1]);
+    }
+  }
+
+  if (candidates.length) {
+    return candidates.reduce((a, b) => (a.length >= b.length ? a : b));
+  }
+
+  const clauses = text.split(/[,|]\s*|\s+[–—]\s+|\s+\|\s+/);
+  for (const clause of clauses) {
+    const t = trimText(clause);
+    if (
+      t.length >= 8 &&
+      t.length < 140 &&
+      /\b(university|institute|college|campus)\b/i.test(t) &&
+      !isModeOnlyLocationLabel(t)
+    ) {
+      pushIfValid(t);
+    }
+  }
+
+  return candidates.length ? candidates.reduce((a, b) => (a.length >= b.length ? a : b)) : '';
+}
+
+function textHintsOnlineMode(title: string, organizer: string, description: string): boolean {
+  const blob = `${title} ${organizer} ${description}`.toLowerCase();
+  return /\bvirtual\b|\bfully online\b|\bonline only\b|\bremote only\b/.test(blob);
+}
+
+function logLocationFallback(sourceTag: string, title: string, organizer: string): void {
+  console.warn(
+    `[locationExtract] No venue before Online/Unknown fallback | source=${sourceTag} | title="${title}" | organizer="${organizer}"`
+  );
+}
+
+function resolveLocationAndModeCore(params: {
+  explicitLocationRaw?: string;
+  icon?: string;
+  organizationName?: string;
+  title?: string;
+  subtitle?: string;
+  description?: string;
+  sourceTag?: string;
+}): { location: string; type: 'online' | 'in-person' } {
+  const rawLoc = trimText(params.explicitLocationRaw);
+  const org = trimText(params.organizationName);
+  const titleT = trimText(params.title);
+  const subT = trimText(params.subtitle);
+  const descT = trimText(params.description);
+
+  const displayedIsModeOnly = isModeOnlyLocationLabel(rawLoc);
+  const isGlobe = trimText(params.icon) === 'globe';
+  const modeShouldBeOnline =
+    isGlobe || displayedIsModeOnly || textHintsOnlineMode(titleT, org, descT);
+
+  let location = '';
+  if (rawLoc && !displayedIsModeOnly) {
+    location = cleanInstitutionPhrase(rawLoc);
+  }
+
+  if (!location) {
+    for (const chunk of [titleT, org, subT, descT]) {
+      const extracted = extractInstitutionFromText(chunk);
+      if (extracted) {
+        location = extracted;
+        break;
+      }
+    }
+  }
+
+  if (!location && org && looksLikePhysicalVenueLabel(org) && !isModeOnlyLocationLabel(org)) {
+    location = cleanInstitutionPhrase(org);
+  }
+
+  if (!location) {
+    logLocationFallback(params.sourceTag || 'unknown', titleT, org);
+    location = modeShouldBeOnline ? 'Online' : 'Unknown';
+  }
+
+  const type: 'online' | 'in-person' = modeShouldBeOnline ? 'online' : 'in-person';
+
+  return { location, type };
+}
+
+function resolveDevpostLocationAndType(
+  item: any,
+  opts?: { description?: string; subtitle?: string }
+): { location: string; type: 'online' | 'in-person' } {
+  const dl = item.displayed_location || {};
+  return resolveLocationAndModeCore({
+    explicitLocationRaw: dl.location,
+    icon: dl.icon,
+    organizationName: item.organization_name,
+    title: item.title,
+    subtitle: opts?.subtitle ?? item.subtitle ?? item.tagline ?? '',
+    description: opts?.description ?? item.description ?? '',
+    sourceTag: 'Devpost'
+  });
+}
+
 export async function parseHackathons(jsonData: any): Promise<Hackathon[]> {
   if (!jsonData || !jsonData.hackathons || !Array.isArray(jsonData.hackathons)) {
     console.error('Invalid Devpost JSON data:', jsonData);
@@ -13,6 +205,9 @@ export async function parseHackathons(jsonData: any): Promise<Hackathon[]> {
     const endDate = parseDateFromSubmissionPeriod(submission_period_dates, 1);
 
     const generatedDescription = await fetchDescription(item.url);
+    const { location, type } = resolveDevpostLocationAndType(item, {
+      description: generatedDescription
+    });
     const hackathon: Hackathon = {
       id: 'dp-' + item.id,
       title: item.title,
@@ -23,8 +218,8 @@ export async function parseHackathons(jsonData: any): Promise<Hackathon[]> {
       imageUrl: item.thumbnail_url ? 'https:' + item.thumbnail_url : '', // Ensure https
       registrationUrl: item.url,
       organizer: item.organization_name,
-      location: item.displayed_location?.location || 'Online',
-      type: item.displayed_location?.location?.toLowerCase() === 'online' ? 'online' : 'in-person', // Assuming if not 'Online' it's in-person
+      location,
+      type,
       tags: item.themes ? item.themes.map((theme: any) => theme.name) : await fetchTags(generatedDescription),
       status: item.open_state // Assuming open_state maps to status directly, might need adjustments
     };

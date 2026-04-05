@@ -4,6 +4,7 @@
  */
 const axios = require("axios");
 const cheerio = require("cheerio");
+const { resolveFromUnstopRow } = require("./resolveLocationAndMode");
 
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
@@ -47,6 +48,7 @@ function mapRow(h) {
     h.public_url ||
     (h.seo_url ? `https://unstop.com/hackathons/${h.seo_url}` : "") ||
     (typeof h._id === "string" ? `https://unstop.com/hackathon/${h._id}` : "");
+  const { mode, location } = resolveFromUnstopRow(h);
   return {
     title: h.title || h.name || "Untitled",
     url,
@@ -55,7 +57,9 @@ function mapRow(h) {
     participants: h.registered_count || 0,
     thumbnail: h.cover_image || h.logoUrl2 || h.banner || "",
     source: "Unstop",
-    themes: Array.isArray(h.themes) ? h.themes : []
+    themes: Array.isArray(h.themes) ? h.themes : [],
+    mode,
+    location
   };
 }
 
@@ -115,7 +119,9 @@ async function scrapeUnstop() {
         participants: 0,
         thumbnail: "",
         source: "Unstop",
-        themes: []
+        themes: [],
+        mode: "online",
+        location: "Online"
       });
     });
 

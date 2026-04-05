@@ -2,6 +2,7 @@
  * Devpost public JSON API (from hackathon-tracker) — more stable than HTML scraping.
  */
 const https = require("https");
+const { resolveFromDevpostHackathon } = require("./resolveLocationAndMode");
 
 function fetchJSON(url, timeoutMs = 15000) {
   return new Promise((resolve, reject) => {
@@ -74,18 +75,22 @@ async function scrapeDevpost(pages = 3) {
       allItems.push(...items);
       if (page >= (data.meta?.total_pages || pages)) break;
     }
-    return allItems.map((h) => ({
-      title: h.title || "Untitled",
-      url: h.url || "",
-      deadline: h.submission_period_dates || "N/A",
-      prize: h.prize_amount || "N/A",
-      participants: h.registrations_count || 0,
-      thumbnail: normalizeThumbnail(h.thumbnail_url),
-      source: "Devpost",
-      themes: Array.isArray(h.themes) ? h.themes.map((t) => t.name) : [],
-      location: h.displayed_location?.location || "Online",
-      open_state: h.open_state || "open"
-    }));
+    return allItems.map((h) => {
+      const { mode, location } = resolveFromDevpostHackathon(h);
+      return {
+        title: h.title || "Untitled",
+        url: h.url || "",
+        deadline: h.submission_period_dates || "N/A",
+        prize: h.prize_amount || "N/A",
+        participants: h.registrations_count || 0,
+        thumbnail: normalizeThumbnail(h.thumbnail_url),
+        source: "Devpost",
+        themes: Array.isArray(h.themes) ? h.themes.map((t) => t.name) : [],
+        mode,
+        location,
+        open_state: h.open_state || "open"
+      };
+    });
   } catch (e) {
     console.warn("[tracker] Devpost error:", e.message);
     return [];

@@ -15,6 +15,7 @@ import {
   Loader2
 } from 'lucide-react';
 import { useHackathon } from '../hooks/useHackathons';
+import { deriveHackathonDisplayLocation } from '../utils/deriveHackathonDisplayLocation';
 
 const HackathonDetail = () => {
   const { id } = useParams();
@@ -275,7 +276,12 @@ const HackathonDetail = () => {
                 <MapPin className="h-5 w-5 text-red-500 mr-3" />
                 <div>
                   <div className="font-semibold text-gray-900">
-                    {hackathon.location}
+                    {deriveHackathonDisplayLocation({
+                      location: hackathon.location,
+                      description: hackathon.description,
+                      organizerName: hackathon.organizerName || hackathon.organizer,
+                      title: hackathon.title
+                    })}
                   </div>
                   <div className="text-sm text-gray-600 capitalize">
                     {hackathon.type}

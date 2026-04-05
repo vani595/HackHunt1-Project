@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { apiClient } from "../../api/client";
 import { useRealtimeStream } from "../../hooks/useRealtimeStream";
+import { deriveHackathonDisplayLocation } from "../../utils/deriveHackathonDisplayLocation";
 
 /** Map GET /hackathons/live items to the card model used in this component */
 function mapLiveApiToCard(h) {
@@ -40,25 +41,50 @@ function mapLiveApiToCard(h) {
       ? h.tags.join(" · ")
       : `Listed on ${h.platform}. Open the event page to register.`;
 
+  const mode = h.mode === "in-person" ? "in-person" : "online";
+  const location = deriveHackathonDisplayLocation({
+    location: h.location,
+    description: desc,
+    organizerName: h.platform || "External",
+    title: h.title
+  });
+
   return {
     _id: h.id,
     id: h.id,
     title: h.title,
     description: desc,
     organizerName: h.platform || "External",
-    location: "Online",
+    location,
     totalPrize: h.prize,
     prize: h.prize,
     imageUrl: h.image,
-    mode: "online",
+    mode,
     calculatedStatus,
     startDate: deadline || "See event page",
     endDate: deadline,
     tags: Array.isArray(h.tags) ? h.tags : [],
     registrationUrl: h.url,
     isLiveScraped: true,
-    sourcePlatform: "Devpost"
+    sourcePlatform: h.platform || inferPlatformFromUrl(h.url)
   };
+}
+
+function normalizeDateValue(dateString) {
+  if (!dateString) return null;
+  const cleaned = String(dateString).replace(/Posted\s*/i, "").trim();
+  const parsed = new Date(cleaned);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function formatDate(dateString) {
+  const dateObj = normalizeDateValue(dateString);
+  if (!dateObj) return String(dateString || "TBA").trim();
+  return dateObj.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric"
+  });
 }
 
 const getStatusTone = (status) => {
@@ -86,12 +112,21 @@ function inferPlatformFromUrl(url) {
 }
 
 function mapInternalHackathonToCard(h) {
+  const organizerName = h.organizerName || h.organizer || "Organizer";
+  const location = deriveHackathonDisplayLocation({
+    location: h.location,
+    description: h.description,
+    organizerName,
+    organizer: h.organizer,
+    title: h.title
+  });
   return {
     ...h,
     _id: h._id || h.id,
     id: h.id || h._id,
     prize: h.prize || h.totalPrize,
-    organizerName: h.organizerName || h.organizer || "Organizer",
+    organizerName,
+    location,
     calculatedStatus: h.status || "upcoming",
     sourcePlatform: inferPlatformFromUrl(h.registrationUrl),
     isInternal: true,
@@ -391,9 +426,7 @@ const BrowseHackathons = ({ user, initialSearchTerm = "" }) => {
                       <div>
                         <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-500">Date</div>
                         <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                          {String(hackathon.startDate || "")
-                            .replace("Posted", "")
-                            .trim() || "TBA"}
+                          {formatDate(hackathon.startDate)}
                         </div>
                       </div>
                     </div>

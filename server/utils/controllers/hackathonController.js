@@ -19,10 +19,17 @@ const getLiveHackathons = async (req, res) => {
     const body = await getLiveScrapedHackathons({ forceRefresh });
     res.json(body);
   } catch (error) {
-    console.error("Error in getLiveHackathons:", error.message);
-    res.status(500).json({
-      message: "Failed to fetch live hackathons",
-      error: error.message
+    console.error("❌ Error in getLiveHackathons:", error.message);
+    // Return 200 with empty hackathons instead of 500 error
+    // This allows the app to continue with platform hackathons
+    res.status(200).json({
+      hackathons: [],
+      cachedAt: new Date().toISOString(),
+      sources: { Devpost: "error", Unstop: "error", DoraHacks: "error" },
+      ttlMs: 30 * 60 * 1000,
+      fromCache: false,
+      error: "Failed to fetch live hackathons - using empty fallback",
+      errorDetails: error.message
     });
   }
 };

@@ -1,5 +1,5 @@
 /**
- * Live hackathon listings from Devpost only.
+ * Live hackathon listings from Devpost, Unstop, and DoraHacks trackers.
  *
  * 30-minute in-memory cache. Use ?refresh=1 to bypass.
  */
@@ -11,6 +11,8 @@ if (process.env.NODE_ENV !== "production") {
 }
 
 const scrapeDevpost = require("./tracker/devpost");
+const scrapeUnstop = require("./tracker/unstop");
+const scrapeDoraHacks = require("./tracker/dorahacks");
 
 const CACHE_TTL_MS = 30 * 60 * 1000;
 
@@ -39,6 +41,10 @@ function normalizeItem(raw) {
       ? raw.themes.map((t) => (typeof t === "string" ? t : t?.name)).filter(Boolean)
       : [];
 
+  const locRaw = raw.location != null ? String(raw.location).trim() : "";
+  const location = locRaw || "Online";
+  const mode = raw.mode === "in-person" ? "in-person" : "online";
+
   return {
     id: stableId(platform, url || title),
     title: title.slice(0, 300),
@@ -50,7 +56,9 @@ function normalizeItem(raw) {
         ? String(raw.prize).trim()
         : "N/A",
     image,
-    tags: tags.slice(0, 12)
+    tags: tags.slice(0, 12),
+    mode,
+    location
   };
 }
 
@@ -68,15 +76,23 @@ function inferTitleFromUrl(url) {
 }
 
 async function runScrapers() {
-  const settled = await Promise.allSettled([scrapeDevpost(3)]);
+  const settled = await Promise.allSettled([
+    scrapeDevpost(3),
+    scrapeUnstop(),
+    scrapeDoraHacks()
+  ]);
 
-  const sources = {
-    Devpost: settled[0].status === "fulfilled" ? "ok" : "error"
-  };
+  const sourceNames = ["Devpost", "Unstop", "DoraHacks"];
+  const sources = {};
+  settled.forEach((r, i) => {
+    sources[sourceNames[i]] = r.status === "fulfilled" ? "ok" : "error";
+  });
 
-  if (settled[0].status === "rejected") {
-    console.warn("[liveScraper] Devpost", settled[0].reason?.message);
-  }
+  settled.forEach((r, i) => {
+    if (r.status === "rejected") {
+      console.warn(`[liveScraper] ${sourceNames[i]}`, r.reason?.message);
+    }
+  });
 
   const merged = [];
   settled.forEach((r) => {
@@ -92,7 +108,9 @@ async function runScrapers() {
           prize: row.prize,
           image: row.thumbnail || row.image,
           themes: row.themes,
-          platform: row.source
+          platform: row.source,
+          mode: row.mode,
+          location: row.location
         })
       );
     });
