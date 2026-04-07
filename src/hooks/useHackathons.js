@@ -25,16 +25,18 @@ export function useHackathons({ searchTerm = "", status = "", type = "" }) {
       try {
         setLoading(true);
         setError(null);
+        
+        // 🔴 YAHAN CHANGE HAI: status: "" bhejna zaroori hai
         const response = await apiClient.getHackathons({
           search: searchTerm,
-          status,
+          status: "", 
           type
         });
 
         if (!active) return;
 
-        // ✨ PRESENTATION MAGIC: Purani dates ko automatically fresh dates mein convert karo! ✨
-        const freshData = (response.hackathons || []).map(h => {
+        // ✨ PRESENTATION MAGIC ✨
+        let freshData = (response.hackathons || []).map(h => {
           const today = new Date();
           const endDate = new Date(h.endDate);
           
@@ -53,8 +55,13 @@ export function useHackathons({ searchTerm = "", status = "", type = "" }) {
           return h;
         });
 
+        // 🔴 YAHAN CHANGE HAI: Filter frontend par lagana hai
+        if (status) {
+          freshData = freshData.filter(h => h.status === status);
+        }
+
         setHackathons(freshData);
-        setTotal(response.total || 0);
+        setTotal(freshData.length);
       } catch (err) {
         if (!active) return;
         setError(err.message || "Failed to load hackathons.");
