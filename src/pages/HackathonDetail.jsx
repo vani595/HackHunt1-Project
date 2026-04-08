@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -14,12 +14,66 @@ import {
   Tag,
   Loader2
 } from 'lucide-react';
+import { apiClient } from '../api/client';
 import { useHackathon } from '../hooks/useHackathons';
-import { deriveHackathonDisplayLocation } from '../utils/deriveHackathonDisplayLocation';
 
 const HackathonDetail = () => {
   const { id } = useParams();
   const { hackathon, loading, error } = useHackathon(id);
+  const [registering, setRegistering] = useState(false);
+  const [registerError, setRegisterError] = useState("");
+  const [registerSuccess, setRegisterSuccess] = useState("");
+
+  const isValidObjectId = (value) => /^[0-9a-fA-F]{24}$/.test(String(value));
+
+  const handleRegister = async () => {
+    const externalUrl = hackathon?.registrationUrl || hackathon?.url;
+    const userId = localStorage.getItem('userId');
+
+    if (!userId) {
+      setRegisterError('Please sign in to register for this hackathon.');
+      setTimeout(() => setRegisterError(''), 4000);
+      return;
+    }
+
+    if (hackathon && isValidObjectId(hackathon.id)) {
+      try {
+        setRegistering(true);
+        setRegisterError('');
+        setRegisterSuccess('');
+
+        await apiClient.registerForHackathon(hackathon.id, {
+          userId,
+          teamName: '',
+          teamMembers: 1
+        });
+
+        setRegisterSuccess(
+          `Registered successfully.${externalUrl ? ' Opening registration page...' : ''}`
+        );
+        setTimeout(() => setRegisterSuccess(''), 4000);
+
+        if (externalUrl && String(externalUrl).startsWith('http')) {
+          window.open(externalUrl, '_blank', 'noopener,noreferrer');
+        }
+      } catch (err) {
+        const message = err.message || 'Failed to register for hackathon.';
+        setRegisterError(message);
+        setTimeout(() => setRegisterError(''), 4000);
+      } finally {
+        setRegistering(false);
+      }
+      return;
+    }
+
+    if (externalUrl && String(externalUrl).startsWith('http')) {
+      window.open(externalUrl, '_blank', 'noopener,noreferrer');
+      return;
+    }
+
+    setRegisterError('Could not find a registration URL for this hackathon.');
+    setTimeout(() => setRegisterError(''), 4000);
+  };
 
   if (loading) {
     return (
@@ -276,12 +330,7 @@ const HackathonDetail = () => {
                 <MapPin className="h-5 w-5 text-red-500 mr-3" />
                 <div>
                   <div className="font-semibold text-gray-900">
-                    {deriveHackathonDisplayLocation({
-                      location: hackathon.location,
-                      description: hackathon.description,
-                      organizerName: hackathon.organizerName || hackathon.organizer,
-                      title: hackathon.title
-                    })}
+                    {hackathon.location}
                   </div>
                   <div className="text-sm text-gray-600 capitalize">
                     {hackathon.type}
@@ -322,19 +371,21 @@ const HackathonDetail = () => {
             <p className="text-purple-100 text-sm mb-4">
               Join thousands of developers building innovative solutions
             </p>
-            <a
-              href={
-                hackathon.registrationUrl && hackathon.registrationUrl !== '#'
-                  ? hackathon.registrationUrl
-                  : `https://unstop.com/search?q=${encodeURIComponent(hackathon.title || '')}`
-              }
-              target="_blank"
-              rel="noopener noreferrer"
-              className="w-full bg-white text-purple-600 py-3 px-4 rounded-lg font-semibold hover:bg-gray-50 transition-colors duration-200 flex items-center justify-center"
+            <button
+              type="button"
+              onClick={handleRegister}
+              disabled={registering}
+              className="w-full bg-white text-purple-600 py-3 px-4 rounded-lg font-semibold hover:bg-gray-50 transition-colors duration-200 flex items-center justify-center disabled:cursor-not-allowed disabled:opacity-70"
             >
-              Register Now
+              {registering ? 'Registering...' : 'Register Now'}
               <ExternalLink className="h-4 w-4 ml-2" />
-            </a>
+            </button>
+            {registerSuccess && (
+              <p className="mt-3 text-sm text-emerald-700">{registerSuccess}</p>
+            )}
+            {registerError && (
+              <p className="mt-3 text-sm text-red-600">{registerError}</p>
+            )}
           </div>
 
           {hackathon.participants && hackathon.maxParticipants && (

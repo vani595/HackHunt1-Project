@@ -12,80 +12,6 @@ import {
 } from "lucide-react";
 import { apiClient } from "../../api/client";
 import { useRealtimeStream } from "../../hooks/useRealtimeStream";
-import { deriveHackathonDisplayLocation } from "../../utils/deriveHackathonDisplayLocation";
-
-/** Map GET /hackathons/live items to the card model used in this component */
-function mapLiveApiToCard(h) {
-  const deadline = h.deadline && h.deadline !== "N/A" ? String(h.deadline) : "";
-  
-  // Priority 1: Check status field first
-  const normalizedStatus = String(h.status || "").toLowerCase();
-  let calculatedStatus = "ongoing"; // Default to ongoing for live/external events
-  
-  if (normalizedStatus === "open" || normalizedStatus === "active" || normalizedStatus === "ongoing") {
-    calculatedStatus = "ongoing";
-  } else if (normalizedStatus === "ended" || normalizedStatus === "closed" || normalizedStatus === "past") {
-    calculatedStatus = "ended";
-  } else if (normalizedStatus === "upcoming" || normalizedStatus === "scheduled" || normalizedStatus === "planned") {
-    calculatedStatus = "upcoming";
-  } else if (deadline) {
-    // Priority 2: Fall back to deadline-based logic for external events
-    const end = Date.parse(deadline);
-    if (!Number.isNaN(end)) {
-      calculatedStatus = end < Date.now() ? "ended" : "upcoming";
-    }
-  }
-  
-  const desc =
-    Array.isArray(h.tags) && h.tags.length
-      ? h.tags.join(" · ")
-      : `Listed on ${h.platform}. Open the event page to register.`;
-
-  const mode = h.mode === "in-person" ? "in-person" : "online";
-  const location = deriveHackathonDisplayLocation({
-    location: h.location,
-    description: desc,
-    organizerName: h.platform || "External",
-    title: h.title
-  });
-
-  return {
-    _id: h.id,
-    id: h.id,
-    title: h.title,
-    description: desc,
-    organizerName: h.platform || "External",
-    location,
-    totalPrize: h.prize,
-    prize: h.prize,
-    imageUrl: h.image,
-    mode,
-    calculatedStatus,
-    startDate: deadline || "See event page",
-    endDate: deadline,
-    tags: Array.isArray(h.tags) ? h.tags : [],
-    registrationUrl: h.url,
-    isLiveScraped: true,
-    sourcePlatform: h.platform || inferPlatformFromUrl(h.url)
-  };
-}
-
-function normalizeDateValue(dateString) {
-  if (!dateString) return null;
-  const cleaned = String(dateString).replace(/Posted\s*/i, "").trim();
-  const parsed = new Date(cleaned);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
-}
-
-function formatDate(dateString) {
-  const dateObj = normalizeDateValue(dateString);
-  if (!dateObj) return String(dateString || "TBA").trim();
-  return dateObj.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric"
-  });
-}
 
 const getStatusTone = (status) => {
   if (status === "ongoing") return "bg-emerald-500/20 text-emerald-100 border-emerald-500/30";
@@ -95,8 +21,9 @@ const getStatusTone = (status) => {
 };
 
 const getModeIcon = (mode) => {
-  if (mode === "online") return <Globe size={14} className="mr-1" />;
-  if (mode === "in-person") return <MapPin size={14} className="mr-1" />;
+  const normalizedMode = String(mode || "").toLowerCase();
+  if (normalizedMode.includes("online")) return <Globe size={14} className="mr-1" />;
+  if (normalizedMode.includes("in-person") || normalizedMode.includes("offline")) return <MapPin size={14} className="mr-1" />;
   return <Sparkles size={14} className="mr-1" />;
 };
 
@@ -111,24 +38,47 @@ function inferPlatformFromUrl(url) {
   return "HackHunt";
 }
 
+const calculateRealStatus = (endDate) => {
+  const now = Date.now();
+  const parseDateString = (value) => {
+    if (!value) return NaN;
+    return Date.parse(String(value).replace(/Posted\s*/i, "").trim());
+  };
+
+  const end = parseDateString(endDate);
+  if (!Number.isNaN(end) && now > end) {
+    return "ended";
+  }
+  return "ongoing"; 
+};
+
 function mapInternalHackathonToCard(h) {
-  const organizerName = h.organizerName || h.organizer || "Organizer";
-  const location = deriveHackathonDisplayLocation({
-    location: h.location,
-    description: h.description,
-    organizerName,
-    organizer: h.organizer,
-    title: h.title
-  });
+  if (!h) return null;
+  const rawMode = String(h.mode || h.type || "").toLowerCase();
+  const rawLoc = String(h.location || "").toLowerCase();
+
+  let actualMode = "in-person";
+  if (rawMode.includes("online") || rawLoc.includes("online") || rawLoc === "tba") {
+    actualMode = "online";
+  } else if (rawMode.includes("hybrid") || rawLoc.includes("hybrid")) {
+    actualMode = "hybrid";
+  } else if (rawMode.includes("offline") || rawMode.includes("in-person")) {
+    actualMode = "in-person";
+  } else if (rawMode) {
+    actualMode = rawMode;
+  }
+
+  const realStatus = calculateRealStatus(h.endDate || h.deadline);
+
   return {
     ...h,
-    _id: h._id || h.id,
-    id: h.id || h._id,
-    prize: h.prize || h.totalPrize,
-    organizerName,
-    location,
-    calculatedStatus: h.status || "upcoming",
-    sourcePlatform: inferPlatformFromUrl(h.registrationUrl),
+    _id: h._id || h.id || Math.random().toString(),
+    id: h.id || h._id || Math.random().toString(),
+    prize: h.prize || h.totalPrize || "TBA",
+    organizerName: h.organizerName || h.organizer || "Organizer",
+    calculatedStatus: realStatus, 
+    mode: actualMode,
+    sourcePlatform: inferPlatformFromUrl(h.registrationUrl || h.url),
     isInternal: true,
     isLiveScraped: false
   };
@@ -140,8 +90,11 @@ const BrowseHackathons = ({ user, initialSearchTerm = "" }) => {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
+  
   const [filterStatus, setFilterStatus] = useState("all");
-  const [dataSource, setDataSource] = useState(""); // 'platform' | 'platform+live' | 'live'
+  const [filterMode, setFilterMode] = useState("all"); 
+  
+  const [dataSource, setDataSource] = useState(""); 
   const [reloadKey, setReloadKey] = useState(0);
   const [registeringId, setRegisteringId] = useState("");
 
@@ -149,9 +102,7 @@ const BrowseHackathons = ({ user, initialSearchTerm = "" }) => {
     "hackathon:created": () => setReloadKey((value) => value + 1),
     "hackathon:updated": () => setReloadKey((value) => value + 1),
     "hackathon:deleted": () => setReloadKey((value) => value + 1),
-    "hackathon:approval-updated": () => setReloadKey((value) => value + 1),
-    "registration:created": () => setReloadKey((value) => value + 1),
-    "registration:deleted": () => setReloadKey((value) => value + 1)
+    "hackathon:approval-updated": () => setReloadKey((value) => value + 1)
   });
 
   const loadData = async () => {
@@ -160,38 +111,22 @@ const BrowseHackathons = ({ user, initialSearchTerm = "" }) => {
       setError("");
 
       let platformRows = [];
-      let liveRows = [];
 
       try {
         const res = await apiClient.getHackathons();
-        platformRows = (res.hackathons || []).map(mapInternalHackathonToCard);
+        const validData = (res.hackathons || []).filter(h => h !== null && h !== undefined);
+        platformRows = validData.map(mapInternalHackathonToCard).filter(h => h !== null);
       } catch (apiErr) {
         console.warn("Platform hackathons API:", apiErr?.message || apiErr);
       }
 
-      try {
-        const res = await apiClient.getLiveScrapedHackathons();
-        const live = res.hackathons || [];
-        liveRows = live.map(mapLiveApiToCard);
-      } catch (apiErr) {
-        console.warn("Live hackathons API:", apiErr?.message || apiErr);
-      }
-
-      let rows = [...platformRows, ...liveRows];
-
-      if (platformRows.length > 0 && liveRows.length > 0) {
-        setDataSource("platform+live");
-      } else if (platformRows.length > 0) {
+      if (platformRows.length > 0) {
         setDataSource("platform");
-      } else if (liveRows.length > 0) {
-        setDataSource("live");
-      }
-
-      if (rows.length === 0) {
+      } else {
         setDataSource("");
       }
 
-      setHackathons(rows);
+      setHackathons(platformRows);
     } catch (err) {
       console.error("Error loading hackathons:", err);
       setError("Could not load hackathons. Try again later.");
@@ -206,41 +141,31 @@ const BrowseHackathons = ({ user, initialSearchTerm = "" }) => {
   }, [reloadKey]);
 
   useEffect(() => {
-    if (typeof initialSearchTerm === "string" && initialSearchTerm.trim()) {
-      setSearchTerm(initialSearchTerm.trim());
-    }
+    if (initialSearchTerm) setSearchTerm(initialSearchTerm.trim());
   }, [initialSearchTerm]);
 
-  // FIXED: Bulletproof Filter Logic
   const filteredHackathons = useMemo(() => {
-    return hackathons.filter((hackathon) => {
-      // 1. Search Logic (Title, Description, Organizer, Location)
-      const searchTarget = `
-        ${hackathon.title || ""} 
-        ${hackathon.description || ""} 
-        ${hackathon.organizerName || ""} 
-        ${hackathon.location || ""}
-        ${hackathon.sourcePlatform || ""}
-      `.toLowerCase();
-      
+    return hackathons.filter((h) => {
+      if (!h) return false;
+      const searchTarget = `${h.title || ''} ${h.description || ''} ${h.organizerName || ''} ${h.location || ''} ${h.sourcePlatform || ''}`.toLowerCase();
       const matchesSearch = !searchTerm || searchTarget.includes(searchTerm.toLowerCase().trim());
-
-      // 2. Status Logic
-      const matchesStatus = filterStatus === "all" || hackathon.calculatedStatus === filterStatus;
+      const matchesStatus = filterStatus === "all" || h.calculatedStatus === filterStatus;
       
-      return matchesSearch && matchesStatus;
+      const normalizedMode = String(h.mode || "").toLowerCase();
+      let matchesMode = true;
+      if (filterMode === "online") matchesMode = normalizedMode.includes("online");
+      else if (filterMode === "in-person") matchesMode = normalizedMode.includes("in-person") || normalizedMode.includes("offline");
+      else if (filterMode === "hybrid") matchesMode = normalizedMode.includes("hybrid");
+
+      return matchesSearch && matchesStatus && matchesMode;
     });
-  }, [filterStatus, hackathons, searchTerm]);
+  }, [filterStatus, filterMode, hackathons, searchTerm]);
 
   const handleRegister = async (hackathon) => {
     const externalUrl = hackathon.registrationUrl || hackathon.url;
-    if (externalUrl && String(externalUrl).startsWith("http")) {
-      window.open(externalUrl, "_blank", "noopener,noreferrer");
-      return;
-    }
+    const userId = user?.id || localStorage.getItem("userId");
 
     if (hackathon.isInternal) {
-      const userId = user?.id || localStorage.getItem("userId");
       if (!userId) {
         setError("Please sign in again to register for this hackathon.");
         setTimeout(() => setError(""), 3000);
@@ -251,20 +176,33 @@ const BrowseHackathons = ({ user, initialSearchTerm = "" }) => {
         setRegisteringId(hackathon._id || hackathon.id);
         setError("");
         setSuccess("");
+
         await apiClient.registerForHackathon(hackathon._id || hackathon.id, {
           userId,
           teamName: "",
           teamMembers: 1
         });
-        setSuccess(`Registered for ${hackathon.title} successfully.`);
+
+        setSuccess(
+          `Registered successfully.${externalUrl ? " Opening registration page..." : ""}`
+        );
         setTimeout(() => setSuccess(""), 3000);
         setReloadKey((value) => value + 1);
+
+        if (externalUrl && String(externalUrl).startsWith("http")) {
+          window.open(externalUrl, "_blank", "noopener,noreferrer");
+        }
       } catch (err) {
         setError(err.message || "Failed to register for hackathon.");
         setTimeout(() => setError(""), 3000);
       } finally {
         setRegisteringId("");
       }
+      return;
+    }
+
+    if (externalUrl && String(externalUrl).startsWith("http")) {
+      window.open(externalUrl, "_blank", "noopener,noreferrer");
       return;
     }
 
@@ -287,31 +225,25 @@ const BrowseHackathons = ({ user, initialSearchTerm = "" }) => {
           <div className="max-w-2xl">
             <div className="inline-flex items-center gap-2 rounded-full bg-violet-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-violet-700 dark:bg-violet-500/15 dark:text-violet-300">
               <Sparkles size={14} />
-              {dataSource === "live" ? "Live feed (Devpost only)" : "Discovery"}
+              Platform Discovery
             </div>
             <h3 className="mt-4 text-3xl font-bold tracking-[-0.04em] text-slate-950 dark:text-slate-50">
               Explore Premium Hackathons
             </h3>
             <p className="mt-3 text-base leading-7 text-slate-600 dark:text-slate-300">
-              {dataSource === "live"
-                ? "Live listings from the server (Devpost API only). Register opens the official event page."
-                : dataSource === "platform"
-                ? "Approved HackHunt hackathons are now live here for users to discover and register."
-                : dataSource === "platform+live"
-                ? "Browse approved HackHunt hackathons alongside live external listings in one place."
-                : "Discover cutting-edge events, compete with the best, and build the future."}
+              Approved HackHunt hackathons are live here for users to discover and register. Compete with the best and build the future.
             </p>
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="rounded-[24px] border border-blue-200 bg-blue-50/90 px-4 py-4 shadow-sm dark:border-blue-500/20 dark:bg-blue-500/10">
               <div className="text-xs font-semibold uppercase tracking-[0.2em] text-blue-700">Total Events</div>
-              <div className="mt-2 text-3xl font-bold text-slate-950 dark:text-slate-50">{hackathons.length}</div>
+              <div className="mt-2 text-3xl font-bold text-slate-950 dark:text-slate-50">{filteredHackathons.length}</div>
             </div>
             <div className="rounded-[24px] border border-emerald-200 bg-emerald-50/90 px-4 py-4 shadow-sm dark:border-emerald-500/20 dark:bg-emerald-500/10">
               <div className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-700">Active Events</div>
               <div className="mt-2 text-3xl font-bold text-slate-950 dark:text-slate-50">
-                {hackathons.filter((item) => item.calculatedStatus === "ongoing").length}
+                {filteredHackathons.filter((item) => item.calculatedStatus === "ongoing").length}
               </div>
             </div>
           </div>
@@ -343,29 +275,39 @@ const BrowseHackathons = ({ user, initialSearchTerm = "" }) => {
             />
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <div className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3.5 text-sm text-slate-500 dark:border-white/10 dark:bg-slate-800 dark:text-slate-400">
               <Filter size={16} />
             </div>
+            
             <select
               value={filterStatus}
               onChange={(e) => setFilterStatus(e.target.value)}
               className="cursor-pointer rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3.5 text-sm font-medium text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-500/10 dark:border-white/10 dark:bg-slate-800 dark:text-slate-100"
             >
               <option value="all">All Statuses</option>
-              <option value="upcoming">Upcoming</option>
-              <option value="ongoing">Ongoing</option>
+              <option value="ongoing">Active / Open</option>
               <option value="ended">Ended</option>
+            </select>
+            
+            <select
+              value={filterMode}
+              onChange={(e) => setFilterMode(e.target.value)}
+              className="cursor-pointer rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3.5 text-sm font-medium text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-500/10 dark:border-white/10 dark:bg-slate-800 dark:text-slate-100"
+            >
+              <option value="all">All Modes</option>
+              <option value="online">Online</option>
+              <option value="in-person">Offline / In-Person</option>
+              <option value="hybrid">Hybrid</option>
             </select>
           </div>
         </div>
       </section>
-
+      
       {filteredHackathons.length > 0 ? (
         <div className="grid grid-cols-1 gap-8 xl:grid-cols-2">
           {filteredHackathons.map((hackathon, index) => {
             const isEnded = hackathon.calculatedStatus === "ended";
-
             return (
               <article
                 key={hackathon._id}
@@ -386,7 +328,7 @@ const BrowseHackathons = ({ user, initialSearchTerm = "" }) => {
 
                   <div className="absolute left-5 top-5 flex gap-2">
                     <span className={`inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-bold uppercase tracking-wider backdrop-blur-md ${getStatusTone(hackathon.calculatedStatus)}`}>
-                      {hackathon.calculatedStatus}
+                      {hackathon.calculatedStatus === "ongoing" ? "Active" : hackathon.calculatedStatus}
                     </span>
                   </div>
 
@@ -404,7 +346,7 @@ const BrowseHackathons = ({ user, initialSearchTerm = "" }) => {
 
                   <div className="absolute bottom-5 left-5 right-5">
                     <h4 className="text-2xl font-bold tracking-tight text-white line-clamp-1 shadow-sm">
-                      {hackathon.title}
+                      {hackathon.title || "Untitled"}
                     </h4>
                     <p className="mt-1 text-sm font-medium text-slate-300 flex items-center gap-1.5">
                        <Trophy size={14} className="text-yellow-400" />
@@ -415,9 +357,7 @@ const BrowseHackathons = ({ user, initialSearchTerm = "" }) => {
 
                 <div className="flex flex-1 flex-col p-6">
                   <p className="mb-6 text-sm leading-relaxed text-slate-600 line-clamp-2 dark:text-slate-300">
-                    {(hackathon.description || "")
-                      .replace(/[#*]/g, "")
-                      .trim()}
+                    {(hackathon.description || "").replace(/[#*]/g, "").trim()}
                   </p>
 
                   <div className="grid gap-3 sm:grid-cols-2 mb-6">
@@ -426,7 +366,7 @@ const BrowseHackathons = ({ user, initialSearchTerm = "" }) => {
                       <div>
                         <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-500">Date</div>
                         <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                          {formatDate(hackathon.startDate)}
+                          {String(hackathon.startDate || hackathon.deadline || "TBA").replace("Posted", "").trim().substring(0, 15)}
                         </div>
                       </div>
                     </div>
@@ -442,48 +382,13 @@ const BrowseHackathons = ({ user, initialSearchTerm = "" }) => {
                     </div>
                   </div>
 
-                  <div className="flex flex-wrap gap-2 mb-6 mt-auto">
-                    {(hackathon.tags || []).slice(0, 3).map((tag) => (
-                      <span key={tag} className="rounded-lg border border-violet-100 bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-700 dark:border-violet-500/20 dark:bg-violet-500/15 dark:text-violet-300">
-                        {tag}
-                      </span>
-                    ))}
-                    {(hackathon.tags || []).length > 3 && (
-                       <span className="rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                         +{hackathon.tags.length - 3} more
-                       </span>
-                    )}
-                  </div>
-
                   <div className="flex items-center justify-between gap-3 border-t border-slate-100 pt-5 dark:border-white/10">
-                    {hackathon.isInternal ? (
-                      <Link
-                        to={`/hackathon/${hackathon._id || hackathon.id}`}
-                        className="flex-1 rounded-2xl border border-violet-200 bg-violet-50 px-4 py-3.5 text-center text-sm font-bold text-violet-700 transition-colors duration-200 hover:bg-violet-100 dark:border-violet-500/20 dark:bg-violet-500/15 dark:text-violet-300 dark:hover:bg-violet-500/20"
-                      >
-                        View Details
-                      </Link>
-                    ) : hackathon.isLiveScraped &&
-                    hackathon.registrationUrl &&
-                    String(hackathon.registrationUrl).startsWith("http") ? (
-                      <a
-                        href={hackathon.registrationUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex-1 rounded-2xl border border-violet-200 bg-violet-50 px-4 py-3.5 text-center text-sm font-bold text-violet-700 transition-colors duration-200 hover:bg-violet-100 dark:border-violet-500/20 dark:bg-violet-500/15 dark:text-violet-300 dark:hover:bg-violet-500/20"
-                      >
-                        View Details
-                      </a>
-                    ) : hackathon.calculatedStatus === "ongoing" ? (
-                      <Link
-                        to={`/hackathon/${hackathon._id || hackathon.id}`}
-                        className="flex-1 rounded-2xl border border-violet-200 bg-violet-50 px-4 py-3.5 text-center text-sm font-bold text-violet-700 transition-colors duration-200 hover:bg-violet-100 dark:border-violet-500/20 dark:bg-violet-500/15 dark:text-violet-300 dark:hover:bg-violet-500/20"
-                      >
-                        View Details
-                      </Link>
-                    ) : (
-                      <div className="flex-1" />
-                    )}
+                    <Link
+                      to={`/hackathon/${hackathon._id || hackathon.id}`}
+                      className="flex-1 rounded-2xl border border-violet-200 bg-violet-50 px-4 py-3.5 text-center text-sm font-bold text-violet-700 transition-colors duration-200 hover:bg-violet-100 dark:border-violet-500/20 dark:bg-violet-500/15 dark:text-violet-300 dark:hover:bg-violet-500/20"
+                    >
+                      View Details
+                    </Link>
 
                     <button
                       onClick={() => handleRegister(hackathon)}
@@ -512,7 +417,7 @@ const BrowseHackathons = ({ user, initialSearchTerm = "" }) => {
           <Sparkles className="mb-4 h-10 w-10 text-slate-300 dark:text-slate-600" />
           <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100">No hackathons found</h3>
           <p className="mt-2 max-w-sm text-sm text-slate-500 dark:text-slate-400">
-            We couldn't find any hackathons matching your current filters. Try adjusting your search or status.
+            We couldn't find any hackathons matching your current filters.
           </p>
         </div>
       )}

@@ -70,7 +70,7 @@ const normalizeErrorMessage = (rawMessage, fallbackMessage) => {
   }
 
   const legacyErrorMessages = {
-    "User not registered with this email": "No account is registered with this email address.",
+   
     "User not registered with this email": "No account is registered with this email address.",
     "No account is registered with this email.": "No account is registered with this email address.",
     "Please enter a valid email address.": "Please enter a valid email address.",

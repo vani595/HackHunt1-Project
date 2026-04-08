@@ -4,7 +4,6 @@
  */
 const axios = require("axios");
 const cheerio = require("cheerio");
-const { resolveFromUnstopRow } = require("./resolveLocationAndMode");
 
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
@@ -43,23 +42,48 @@ function collectHackathonLikeArrays(obj, depth = 0, out = []) {
   return out;
 }
 
+function parseParticipants(h) {
+  const rawValue =
+    h.registered_count ??
+    h.registration_count ??
+    h.register_count ??
+    h.registrations_count ??
+    h.participants ??
+    h.participant_count ??
+    h.hacker_count ??
+    h.attendees_count ??
+    h.attendees ??
+    0;
+
+  if (typeof rawValue === "string") {
+    const normalized = rawValue.replace(/[^\d]/g, "");
+    return Number.isFinite(Number(normalized)) ? Number(normalized) : 0;
+  }
+
+  return Number.isFinite(Number(rawValue)) ? Number(rawValue) : 0;
+}
+
 function mapRow(h) {
-  const url =
+  let url =
     h.public_url ||
     (h.seo_url ? `https://unstop.com/hackathons/${h.seo_url}` : "") ||
     (typeof h._id === "string" ? `https://unstop.com/hackathon/${h._id}` : "");
-  const { mode, location } = resolveFromUnstopRow(h);
+
+  // FIX: Ensure the URL is absolute by appending Unstop's domain if it's missing
+  if (url && !url.startsWith("http")) {
+    const cleanPath = url.startsWith("/") ? url.substring(1) : url;
+    url = `https://unstop.com/${cleanPath}`;
+  }
+
   return {
     title: h.title || h.name || "Untitled",
-    url,
+    url: url,
     deadline: h.end_date || h.registration_end_date || h.start_date || "N/A",
     prize: h.prize_money != null ? `$${h.prize_money}` : "N/A",
-    participants: h.registered_count || 0,
+    participants: parseParticipants(h),
     thumbnail: h.cover_image || h.logoUrl2 || h.banner || "",
     source: "Unstop",
-    themes: Array.isArray(h.themes) ? h.themes : [],
-    mode,
-    location
+    themes: Array.isArray(h.themes) ? h.themes : []
   };
 }
 
@@ -119,9 +143,7 @@ async function scrapeUnstop() {
         participants: 0,
         thumbnail: "",
         source: "Unstop",
-        themes: [],
-        mode: "online",
-        location: "Online"
+        themes: []
       });
     });
 

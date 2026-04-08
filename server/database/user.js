@@ -10,9 +10,9 @@ const Schema = mongoose.Schema;
 const userSchema = new Schema(
   {
     email: { type: String, unique: true, required: true, lowercase: true, trim: true },
-    password: { type: String, required: true },
+password: { type: String, required: false, default: null },        // null for Google OAuth users
     firstName: { type: String, required: true },
-    lastName: { type: String, required: true },
+    lastName: { type: String, required: false, default: "" },
     phoneNumber: { type: String, required: true },
     role: { type: String, default: "user", enum: ["user"], immutable: true },
     profilePicture: { type: String, default: null },
@@ -31,9 +31,9 @@ const userSchema = new Schema(
 const organizerSchema = new Schema(
   {
     email: { type: String, unique: true, required: true, lowercase: true, trim: true },
-    password: { type: String, required: true },
+password: { type: String, required: false, default: null },        // null for Google OAuth users
     firstName: { type: String, required: true },
-    lastName: { type: String, required: true },
+    lastName: { type: String, required: false, default: "" },
     phoneNumber: { type: String, required: true },
     role: { type: String, default: "organizer", enum: ["organizer"], immutable: true },
     organizationName: { type: String, required: true },
@@ -276,6 +276,149 @@ userRouter.post("/signin", async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+});
+// 3. GOOGLE AUTH — USER
+userRouter.post("/google-auth", async (req, res) => {
+  try {
+    const { email, firstName, lastName, uid, profilePicture, checkOnly } = req.body;
+
+    if (!email || !uid) {
+      return res.status(400).json({ message: "Email and uid are required" });
+    }
+
+    let user = await User.findOne({ email: email.toLowerCase() });
+
+    if (checkOnly && !user) {
+      return res.status(404).json({ message: "No account found. Please sign up first!" });
+    }
+
+    const isNewUser = !user;
+    if (isNewUser) {
+      user = await User.create({
+        email: email.toLowerCase(),
+        firstName: firstName || "User",
+        lastName: lastName || "",
+        phoneNumber: "0000000000",
+        password: null,
+        profilePicture: profilePicture || null,
+        role: "user"
+      });
+
+      broadcast("user:created", {
+        userId: String(user._id),
+        role: user.role,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        email: user.email
+      });
+
+      createActivity({
+        type: "user_signup",
+        authorId: String(user._id),
+        authorName: `${user.firstName} ${user.lastName}`.trim(),
+        authorRole: user.role,
+        message: `${user.firstName} joined the platform via Google.`,
+        targetId: String(user._id),
+        targetType: "user"
+      });
+    }
+
+    user.lastLogin = new Date();
+    await user.save();
+
+    return res.status(200).json({
+      message: isNewUser ? "Account created" : "Login successful",
+      userId: user._id,
+      role: user.role,
+      firstName: user.firstName,
+      email: user.email,
+      isNewUser
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
+// 4. GOOGLE AUTH — ORGANIZER
+userRouter.post("/google-auth-organizer", async (req, res) => {
+  try {
+    const { email, firstName, lastName, uid, profilePicture, organizationName, checkOnly } = req.body;
+
+    if (!email || !uid) {
+      return res.status(400).json({ message: "Email and uid are required" });
+    }
+
+    let organizer = await Organizer.findOne({ email: email.toLowerCase() });
+
+    // Login — organizer nahi mila
+    if (checkOnly && !organizer) {
+      return res.status(404).json({ message: "No organizer account found. Please sign up first!" });
+    }
+
+    // Login — organizer mila
+    if (checkOnly && organizer) {
+      organizer.lastLogin = new Date();
+      await organizer.save();
+      return res.status(200).json({
+        message: "Login successful",
+        userId: organizer._id,
+        role: organizer.role,
+        firstName: organizer.firstName,
+        email: organizer.email,
+        isNewUser: false
+      });
+    }
+
+    // Signup — create karo
+    if (!organizer) {
+      if (!organizationName) {
+        return res.status(400).json({ message: "Organization name is required" });
+      }
+
+      organizer = await Organizer.create({
+        email: email.toLowerCase(),
+        firstName: firstName || "Organizer",
+        lastName: lastName || "",
+        phoneNumber: "0000000000",
+        password: null,
+        profilePicture: profilePicture || null,
+        organizationName,
+        role: "organizer"
+      });
+
+      broadcast("user:created", {
+        userId: String(organizer._id),
+        role: organizer.role,
+        firstName: organizer.firstName,
+        lastName: organizer.lastName,
+        email: organizer.email
+      });
+
+      createActivity({
+        type: "organizer_signup",
+        authorId: String(organizer._id),
+        authorName: `${organizer.firstName} ${organizer.lastName}`.trim(),
+        authorRole: organizer.role,
+        message: `${organizer.firstName} joined the platform as organizer via Google.`,
+        targetId: String(organizer._id),
+        targetType: "organizer"
+      });
+    }
+
+    organizer.lastLogin = new Date();
+    await organizer.save();
+
+    return res.status(200).json({
+      message: "Account created",
+      userId: organizer._id,
+      role: organizer.role,
+      firstName: organizer.firstName,
+      email: organizer.email,
+      isNewUser: true
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 });
 

@@ -1,4 +1,5 @@
 const { Organizer, Admin, User } = require("../../database/user");
+const { sendHackathonApprovalNotification } = require("../emailService");
 const {
   Hackathon,
   HackathonRegistration,
@@ -384,6 +385,17 @@ const updateHackathonApproval = async (req, res) => {
           : `${summary.title} was rejected by admin review.`
     });
 
+    // ── Send email notification to all users when approved ──
+    if (status === "approved") {
+      try {
+        const allUsers = await User.find({ isActive: true }).select("email firstName").lean();
+        await sendHackathonApprovalNotification(hackathon, allUsers);
+      } catch (emailError) {
+        console.error("❌ Email notification failed:", emailError.message);
+        // Don't fail the request if email fails
+      }
+    }
+
     res.json({
       message:
         status === "approved"
@@ -395,7 +407,6 @@ const updateHackathonApproval = async (req, res) => {
     res.status(500).json({ message: "Failed to update hackathon approval." });
   }
 };
-
 const getUserRegistrations = async (req, res) => {
   try {
     const { userId } = req.params;

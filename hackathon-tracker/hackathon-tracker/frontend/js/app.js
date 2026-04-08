@@ -23,7 +23,11 @@ async function fetchHackathons() {
 
     console.log("DATA:", data); // 🔥 DEBUG
 
-    allHackathons = Array.isArray(data) ? data : [];
+    allHackathons = Array.isArray(data)
+      ? data
+      : Array.isArray(data?.hackathons)
+      ? data.hackathons
+      : [];
 
     renderHackathons();
     updateStats();
